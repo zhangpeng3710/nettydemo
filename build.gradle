@@ -1,0 +1,38 @@
+plugins {
+    id 'org.springframework.boot' version '2.7.13' apply false
+    id 'io.spring.dependency-management' version '1.0.15.RELEASE'
+    id 'java'
+}
+
+allprojects {
+    group = 'com.example'
+    version = '1.0.0'
+
+    repositories {
+        mavenCentral()
+    }
+}
+
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'io.spring.dependency-management'
+
+    sourceCompatibility = '1.8'
+    targetCompatibility = '1.8'
+
+    dependencyManagement {
+        imports {
+            mavenBom org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES
+        }
+        dependencies {
+            dependency 'io.netty:netty-all:4.1.94.Final'
+            dependency 'com.google.protobuf:protobuf-java:3.19.6'
+            dependency 'com.google.protobuf:protobuf-java-util:3.19.6'
+            dependency 'com.threerings.getdown:getdown-launcher:1.8.6'
+        }
+    }
+
+    tasks.withType(JavaCompile) {
+        options.encoding = 'UTF-8'
+    }
+}

@@ -1,0 +1,9 @@
+server:
+  port: 8080
+
+netty:
+  ports:
+    tcp: 8888
+    tls: 8889
+    short: 8890
+  upgrade-dir: "d:/Projects/code/nettydemo/upgrade-dir"

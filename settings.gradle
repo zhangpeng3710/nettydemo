@@ -1,0 +1,5 @@
+rootProject.name = 'nettydemo'
+include 'netty-common'
+include 'netty-server'
+include 'netty-client'
+include 'netty-client-upgrade'

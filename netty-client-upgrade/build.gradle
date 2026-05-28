@@ -1,0 +1,70 @@
+plugins {
+    id 'java'
+}
+
+dependencies {
+    implementation 'com.threerings.getdown:getdown-launcher:1.8.6'
+    implementation project(':netty-client')
+}
+
+// Define packaging task
+task packageClientForGetdown {
+    dependsOn ':netty-client:bootJar'
+
+    doLast {
+        def upgradeDir = file("${project.rootDir}/upgrade-dir")
+        if (upgradeDir.exists()) {
+            upgradeDir.deleteDir()
+        }
+        upgradeDir.mkdirs()
+
+        // 1. Copy Netty Client Boot JAR
+        def clientJar = file("${project.project(':netty-client').buildDir}/libs/netty-client-1.0.0.jar")
+        if (!clientJar.exists()) {
+            // Find any jar in the build/libs directory
+            def libsDir = file("${project.project(':netty-client').buildDir}/libs")
+            if (libsDir.exists()) {
+                def files = libsDir.listFiles()
+                if (files != null && files.length > 0) {
+                    clientJar = files[0]
+                }
+            }
+        }
+        
+        if (!clientJar.exists()) {
+            throw new GradleException("Could not find compiled netty-client JAR")
+        }
+
+        def targetJar = new File(upgradeDir, "netty-client.jar")
+        targetJar.bytes = clientJar.bytes
+        println "Copied client JAR to: ${targetJar.absolutePath}"
+
+        // 2. Generate getdown.txt
+        def getdownFile = new File(upgradeDir, "getdown.txt")
+        getdownFile.text = """appbase = http://localhost:8080/upgrade
+class = org.springframework.boot.loader.JarLauncher
+code = netty-client.jar
+jvmarg = -Dfile.encoding=UTF-8
+"""
+        println "Generated getdown.txt"
+
+        // 3. Generate digest2.txt
+        def digestFile = new File(upgradeDir, "digest2.txt")
+        def digestContent = new StringBuilder()
+
+        // Calculate SHA-256 for netty-client.jar
+        def sha256 = getSHA256(targetJar)
+        digestContent.append("netty-client.jar = ").append(sha256).append("\n")
+
+        digestFile.text = digestContent.toString()
+        println "Generated digest2.txt with SHA-256: ${sha256}"
+    }
+}
+
+def getSHA256(File file) {
+    def digest = java.security.MessageDigest.getInstance("SHA-256")
+    file.eachByte(4096) { buffer, length ->
+        digest.update(buffer, 0, length)
+    }
+    return digest.digest().encodeHex().toString()
+}

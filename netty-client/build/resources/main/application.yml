@@ -1,0 +1,9 @@
+netty:
+  host: "localhost"
+  ports:
+    tcp: 8888
+    tls: 8889
+    short: 8890
+  # Connection mode. Options: TCP, TLS, SHORT
+  mode: "TCP"
+  heartbeat-interval: 5

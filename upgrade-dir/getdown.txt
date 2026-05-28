@@ -1,0 +1,4 @@
+appbase = http://localhost:8080/upgrade
+class = org.springframework.boot.loader.JarLauncher
+code = netty-client.jar
+jvmarg = -Dfile.encoding=UTF-8
