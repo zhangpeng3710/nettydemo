@@ -3,7 +3,7 @@
 build/
 */build/
 */plugins
-upgrade-dir
+output/
 
 # IntelliJ IDEA
 .idea/

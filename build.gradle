@@ -1,7 +1,6 @@
 plugins {
     id 'org.springframework.boot' version '2.7.13' apply false
-    id 'io.spring.dependency-management' version '1.0.15.RELEASE'
-    id 'java'
+    id 'io.spring.dependency-management' version '1.0.15.RELEASE' apply false
 }
 
 allprojects {
@@ -29,6 +28,7 @@ subprojects {
             dependency 'com.google.protobuf:protobuf-java:3.19.6'
             dependency 'com.google.protobuf:protobuf-java-util:3.19.6'
             dependency 'com.threerings.getdown:getdown-launcher:1.8.6'
+            dependency 'com.threerings.getdown:getdown-core:1.8.6'
         }
     }
 
@@ -36,3 +36,74 @@ subprojects {
         options.encoding = 'UTF-8'
     }
 }
+
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory
+    delete file("${projectDir}/output")
+}
+
+tasks.register('copyToOutput') {
+    dependsOn ':netty-common:jar'
+    dependsOn ':netty-server:bootJar'
+    dependsOn ':netty-client:bootJar'
+    dependsOn ':netty-client-upgrade:packageClientForGetdown'
+    dependsOn ':netty-client-upgrade:jar'
+    dependsOn ':netty-plugin-client-demo:build'
+    dependsOn ':netty-plugin-server-demo:build'
+
+    doLast {
+        def outputDir = file("${projectDir}/output")
+        if (outputDir.exists()) {
+            outputDir.deleteDir()
+        }
+        outputDir.mkdirs()
+
+        // 1. Copy Netty Server
+        copy {
+            from project(':netty-server').layout.buildDirectory.dir('libs')
+            into file("${outputDir}/netty-server")
+            include "netty-server-*.jar"
+        }
+        // Copy Netty Server Plugins
+        copy {
+            from file("${project(':netty-server').projectDir}/plugins")
+            into file("${outputDir}/netty-server/plugins")
+            include "*.jar"
+        }
+        // Copy upgrade-dir to netty-server/upgrade-dir
+        copy {
+            from file("${project(':netty-client-upgrade').buildDir}/upgrade-dir")
+            into file("${outputDir}/netty-server/upgrade-dir")
+        }
+
+        // 2. Copy Netty Client
+        copy {
+            from project(':netty-client').layout.buildDirectory.dir('libs')
+            into file("${outputDir}/netty-client")
+            include "netty-client-*.jar"
+        }
+        // Copy Netty Client Plugins
+        copy {
+            from file("${project(':netty-client').projectDir}/plugins")
+            into file("${outputDir}/netty-client/plugins")
+            include "*.jar"
+        }
+
+        // 3. Copy Netty Client Upgrade (Launcher)
+        copy {
+            from project(':netty-client-upgrade').layout.buildDirectory.dir('libs')
+            into file("${outputDir}/netty-client-upgrade")
+            include "netty-client-upgrade-*.jar"
+        }
+
+        // 4. Copy Netty Common (optional, but good for completeness)
+        copy {
+            from project(':netty-common').layout.buildDirectory.dir('libs')
+            into file("${outputDir}/netty-common")
+            include "netty-common-*.jar"
+        }
+
+        println "All compiled module outputs copied to ${outputDir.absolutePath}"
+    }
+}
+
