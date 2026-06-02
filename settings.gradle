@@ -3,3 +3,6 @@ include 'netty-common'
 include 'netty-server'
 include 'netty-client'
 include 'netty-client-upgrade'
+include 'netty-plugin-client-demo'
+include 'netty-plugin-server-demo'
+

@@ -1,6 +1,9 @@
 package com.example.netty.client.core;
 
 import com.example.netty.client.handler.ClientHandler;
+import com.example.netty.common.plugin.DynamicPluginLoader;
+import com.example.netty.common.plugin.MessagePlugin;
+import com.example.netty.common.plugin.PluginRegistry;
 import com.example.netty.common.proto.MessagePacket;
 import com.example.netty.common.ssl.SslContextHelper;
 import io.netty.bootstrap.Bootstrap;
@@ -20,9 +23,12 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.handler.timeout.IdleStateHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.io.File;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 @Component
@@ -48,6 +54,11 @@ public class NettyClient {
     @Value("${netty.heartbeat-interval}")
     private int heartbeatInterval;
 
+    @Autowired(required = false)
+    private List<MessagePlugin> springPlugins;
+
+    private final PluginRegistry pluginRegistry = new PluginRegistry();
+
     private final EventLoopGroup group = new NioEventLoopGroup();
     private Channel channel;
 
@@ -60,6 +71,23 @@ public class NettyClient {
     }
 
     public void start() throws Exception {
+        log.info("Registering Spring-managed Netty client plugins...");
+        if (springPlugins != null) {
+            for (MessagePlugin plugin : springPlugins) {
+                pluginRegistry.register(plugin);
+            }
+        }
+
+        log.info("Loading dynamic client plugins from 'plugins' directory...");
+        File pluginsDir = new File("plugins");
+        if (!pluginsDir.exists()) {
+            pluginsDir.mkdirs();
+        }
+        List<MessagePlugin> dynamicPlugins = DynamicPluginLoader.loadPluginsFromDir(pluginsDir.getAbsolutePath());
+        for (MessagePlugin plugin : dynamicPlugins) {
+            pluginRegistry.register(plugin);
+        }
+
         int port;
         SslContext sslContext = null;
 
@@ -103,7 +131,7 @@ public class NettyClient {
                  pipeline.addLast("protobufEncoder", new ProtobufEncoder());
 
                  // Client Handler
-                 pipeline.addLast("handler", new ClientHandler(mode));
+                 pipeline.addLast("handler", new ClientHandler(mode, pluginRegistry));
              }
          });
 
@@ -121,3 +149,4 @@ public class NettyClient {
         log.info("Netty Client stopped.");
     }
 }
+

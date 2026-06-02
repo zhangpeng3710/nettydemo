@@ -46,6 +46,20 @@ public class NettyClientApplication implements CommandLineRunner {
 
             channel.writeAndFlush(testRequest);
 
+            // Send custom SPI Demo request to test DemoServerPlugin
+            Thread.sleep(1000);
+            log.info("Sending custom SPIDemoCommand request to server...");
+            MessagePacket spiDemoRequest = MessagePacket.newBuilder()
+                    .setType(MessageType.REQUEST)
+                    .setSequence(1002L)
+                    .setRequest(Request.newBuilder()
+                            .setReqId(UUID.randomUUID().toString())
+                            .setCommand("SPIDemoCommand")
+                            .setData("Hello SPI Server Plugin!")
+                            .build())
+                    .build();
+            channel.writeAndFlush(spiDemoRequest);
+
             if ("SHORT".equalsIgnoreCase(client.getMode())) {
                 log.info("SHORT mode: Waiting for server response and connection close...");
                 // Keep main thread alive for a few seconds to print logs

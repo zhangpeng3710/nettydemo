@@ -1,5 +1,8 @@
 package com.example.netty.server.core;
 
+import com.example.netty.common.plugin.DynamicPluginLoader;
+import com.example.netty.common.plugin.MessagePlugin;
+import com.example.netty.common.plugin.PluginRegistry;
 import com.example.netty.common.proto.MessagePacket;
 import com.example.netty.common.ssl.SslContextHelper;
 import com.example.netty.server.handler.ServerHandler;
@@ -18,11 +21,13 @@ import io.netty.handler.codec.protobuf.ProtobufVarint32LengthFieldPrepender;
 import io.netty.handler.ssl.SslContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PreDestroy;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -40,12 +45,34 @@ public class NettyServer implements CommandLineRunner {
     @Value("${netty.ports.short}")
     private int shortPort;
 
+    @Autowired(required = false)
+    private List<MessagePlugin> springPlugins;
+
+    private final PluginRegistry pluginRegistry = new PluginRegistry();
+
     private final EventLoopGroup bossGroup = new NioEventLoopGroup(1);
     private final EventLoopGroup workerGroup = new NioEventLoopGroup();
     private final List<Channel> serverChannels = new ArrayList<>();
 
     @Override
     public void run(String... args) throws Exception {
+        log.info("Registering Spring-managed Netty plugins...");
+        if (springPlugins != null) {
+            for (MessagePlugin plugin : springPlugins) {
+                pluginRegistry.register(plugin);
+            }
+        }
+
+        log.info("Loading dynamic plugins from 'plugins' directory...");
+        File pluginsDir = new File("plugins");
+        if (!pluginsDir.exists()) {
+            pluginsDir.mkdirs();
+        }
+        List<MessagePlugin> dynamicPlugins = DynamicPluginLoader.loadPluginsFromDir(pluginsDir.getAbsolutePath());
+        for (MessagePlugin plugin : dynamicPlugins) {
+            pluginRegistry.register(plugin);
+        }
+
         log.info("Starting Netty Servers...");
         
         // 1. Start TCP Server (Long Connection)
@@ -64,26 +91,26 @@ public class NettyServer implements CommandLineRunner {
         b.group(bossGroup, workerGroup)
          .channel(NioServerSocketChannel.class)
          .childHandler(new ChannelInitializer<SocketChannel>() {
-             @Override
-             protected void initChannel(SocketChannel ch) throws Exception {
-                 ChannelPipeline pipeline = ch.pipeline();
+              @Override
+              protected void initChannel(SocketChannel ch) throws Exception {
+                  ChannelPipeline pipeline = ch.pipeline();
 
-                 // If SSL Context is present, add SSL Handler first
-                 if (sslContext != null) {
-                     pipeline.addLast("ssl", sslContext.newHandler(ch.alloc()));
-                 }
+                  // If SSL Context is present, add SSL Handler first
+                  if (sslContext != null) {
+                      pipeline.addLast("ssl", sslContext.newHandler(ch.alloc()));
+                  }
 
-                 // Protobuf Frame Decoders & Encoders
-                 pipeline.addLast("frameDecoder", new ProtobufVarint32FrameDecoder());
-                 pipeline.addLast("protobufDecoder", new ProtobufDecoder(MessagePacket.getDefaultInstance()));
+                  // Protobuf Frame Decoders & Encoders
+                  pipeline.addLast("frameDecoder", new ProtobufVarint32FrameDecoder());
+                  pipeline.addLast("protobufDecoder", new ProtobufDecoder(MessagePacket.getDefaultInstance()));
 
-                 pipeline.addLast("frameEncoder", new ProtobufVarint32LengthFieldPrepender());
-                 pipeline.addLast("protobufEncoder", new ProtobufEncoder());
+                  pipeline.addLast("frameEncoder", new ProtobufVarint32LengthFieldPrepender());
+                  pipeline.addLast("protobufEncoder", new ProtobufEncoder());
 
-                 // Business Handler
-                 pipeline.addLast("handler", new ServerHandler(type));
-             }
-         });
+                  // Business Handler
+                  pipeline.addLast("handler", new ServerHandler(type, pluginRegistry));
+              }
+          });
 
         try {
             Channel channel = b.bind(port).sync().channel();
@@ -108,3 +135,4 @@ public class NettyServer implements CommandLineRunner {
         log.info("Netty Servers shut down successfully.");
     }
 }
+
