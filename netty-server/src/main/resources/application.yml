@@ -7,3 +7,9 @@ netty:
     tls: 8889
     short: 8890
   upgrade-dir: "./upgrade-dir"
+
+oss:
+  endpoint: "https://oss-cn-beijing.aliyuncs.com"
+  bucket-name: "tomin"
+  access-key-id: "${oss.accessKeyId:}"
+  access-key-secret: "${oss.accessKeySecret:}"

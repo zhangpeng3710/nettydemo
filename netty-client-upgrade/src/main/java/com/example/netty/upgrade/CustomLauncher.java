@@ -1,8 +1,5 @@
 package com.example.netty.upgrade;
 
-import com.aliyun.oss.OSS;
-import com.aliyun.oss.OSSClientBuilder;
-import com.aliyun.oss.model.OSSObject;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -25,46 +22,8 @@ public class CustomLauncher {
             appDir.mkdirs();
         }
 
-        // Resolve credentials
-        String accessKeyId = System.getenv("OSS_ACCESS_KEY_ID");
-        String accessKeySecret = System.getenv("OSS_ACCESS_KEY_SECRET");
-
-        if (accessKeyId == null || accessKeyId.trim().isEmpty() ||
-            accessKeySecret == null || accessKeySecret.trim().isEmpty()) {
-            accessKeyId = System.getProperty("oss.accessKeyId");
-            accessKeySecret = System.getProperty("oss.accessKeySecret");
-        }
-
-        if (accessKeyId == null || accessKeyId.trim().isEmpty() ||
-            accessKeySecret == null || accessKeySecret.trim().isEmpty()) {
-            // Try resolving from local.properties in current dir or parent dirs
-            File baseDir = new File(System.getProperty("user.dir"));
-            File localPropsFile = findLocalProperties(baseDir);
-            if (localPropsFile != null) {
-                try (InputStream is = new FileInputStream(localPropsFile)) {
-                    Properties props = new Properties();
-                    props.load(is);
-                    accessKeyId = props.getProperty("oss.accessKeyId");
-                    accessKeySecret = props.getProperty("oss.accessKeySecret");
-                } catch (IOException e) {
-                    System.err.println("Failed to read local.properties: " + e.getMessage());
-                }
-            }
-        }
-
-        if (accessKeyId == null || accessKeyId.trim().isEmpty() ||
-            accessKeySecret == null || accessKeySecret.trim().isEmpty()) {
-            System.err.println("ERROR: Aliyun OSS credentials are not configured!");
-            System.err.println("Please set OSS_ACCESS_KEY_ID & OSS_ACCESS_KEY_SECRET env vars");
-            System.err.println("or add oss.accessKeyId & oss.accessKeySecret in local.properties.");
-            System.exit(1);
-        }
-
-        String endpoint = "https://oss-cn-beijing.aliyuncs.com";
-        String bucketName = "tomin";
-
-        System.out.println("Initializing Aliyun OSS Client with credentials...");
-        final OSS ossClient = new OSSClientBuilder().build(endpoint, accessKeyId, accessKeySecret);
+        String serverUrl = System.getProperty("server.url", "http://localhost:8080");
+        System.out.println("Using server URL for presigned URLs: " + serverUrl);
 
         // Start Local HTTP server proxy on a random free port
         final HttpServer server;
@@ -81,11 +40,39 @@ public class CustomLauncher {
                     String ossKey = path.startsWith("/") ? path.substring(1) : path;
                     
                     try {
+                        // Request presigned URL from the server
+                        String signApiUrl = serverUrl + "/upgrade/sign?key=" + java.net.URLEncoder.encode(ossKey, "UTF-8");
+                        System.out.println("[LocalProxy] Requesting signed URL for key: " + ossKey + " from: " + signApiUrl);
+                        String presignedUrl = fetchPresignedUrl(signApiUrl);
+                        
+                        if (presignedUrl == null || presignedUrl.trim().isEmpty()) {
+                            System.err.println("[LocalProxy] Failed to obtain presigned URL for: " + ossKey);
+                            exchange.sendResponseHeaders(500, -1);
+                            return;
+                        }
+
+                        // Connect to the presigned URL
+                        java.net.URL url = new java.net.URL(presignedUrl);
+                        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                        conn.setRequestMethod("GET");
+                        conn.setConnectTimeout(5000);
+                        conn.setReadTimeout(15000);
+                        
+                        int responseCode = conn.getResponseCode();
+                        if (responseCode != 200) {
+                            System.err.println("[LocalProxy] OSS returned HTTP " + responseCode + " for: " + ossKey);
+                            exchange.sendResponseHeaders(responseCode, -1);
+                            conn.disconnect();
+                            return;
+                        }
+                        
+                        long contentLength = conn.getContentLengthLong();
+                        String contentType = conn.getContentType();
+                        
                         if (ossKey.endsWith("getdown.txt")) {
-                            System.out.println("[LocalProxy] Fetching getdown.txt from OSS and rewriting appbase...");
-                            OSSObject ossObject = ossClient.getObject(bucketName, ossKey);
+                            System.out.println("[LocalProxy] Fetching getdown.txt via presigned URL and rewriting appbase...");
                             String originalContent;
-                            try (InputStream is = ossObject.getObjectContent();
+                            try (InputStream is = conn.getInputStream();
                                  ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
                                 byte[] buffer = new byte[4096];
                                 int len;
@@ -108,23 +95,12 @@ public class CustomLauncher {
                             return;
                         }
                         
-                        // Check if file exists on OSS
-                        if (!ossClient.doesObjectExist(bucketName, ossKey)) {
-                            System.err.println("[LocalProxy] File not found in OSS: " + ossKey);
-                            exchange.sendResponseHeaders(404, -1);
-                            return;
-                        }
-                        
-                        OSSObject ossObject = ossClient.getObject(bucketName, ossKey);
-                        long contentLength = ossObject.getObjectMetadata().getContentLength();
-                        String contentType = ossObject.getObjectMetadata().getContentType();
-                        
                         if (contentType != null) {
                             exchange.getResponseHeaders().set("Content-Type", contentType);
                         }
                         
                         exchange.sendResponseHeaders(200, contentLength > 0 ? contentLength : 0);
-                        try (InputStream is = ossObject.getObjectContent();
+                        try (InputStream is = conn.getInputStream();
                              OutputStream os = exchange.getResponseBody()) {
                             byte[] buffer = new byte[8192];
                             int len;
@@ -148,19 +124,15 @@ public class CustomLauncher {
             System.out.println("Local HTTP proxy started at http://127.0.0.1:" + port + "/upgrade-dir/");
         } catch (IOException e) {
             System.err.println("Failed to start local HTTP proxy server: " + e.getMessage());
-            ossClient.shutdown();
             System.exit(1);
             return;
         }
 
-        // Add Shutdown Hook to stop the proxy server and close OSS client
+        // Add Shutdown Hook to stop the proxy server
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.out.println("Shutting down local proxy server and OSS client...");
+            System.out.println("Shutting down local proxy server...");
             if (server != null) {
                 server.stop(0);
-            }
-            if (ossClient != null) {
-                ossClient.shutdown();
             }
         }));
 
@@ -187,6 +159,23 @@ public class CustomLauncher {
         } catch (Exception e) {
             System.err.println("Error executing Getdown launcher: " + e.getMessage());
             e.printStackTrace();
+        }
+    }
+
+    private static String fetchPresignedUrl(String apiUrl) throws IOException {
+        java.net.URL url = new java.net.URL(apiUrl);
+        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(3000);
+        conn.setReadTimeout(3000);
+        int code = conn.getResponseCode();
+        if (code != 200) {
+            throw new IOException("Server returned HTTP " + code);
+        }
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+            return reader.readLine();
+        } finally {
+            conn.disconnect();
         }
     }
 
