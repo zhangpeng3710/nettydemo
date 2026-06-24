@@ -45,8 +45,8 @@ tasks.register('clean', Delete) {
 tasks.register('copyToOutput') {
     dependsOn ':netty-common:jar'
     dependsOn ':netty-server:bootJar'
-    dependsOn ':netty-client:bootJar'
-    dependsOn ':netty-client-upgrade:packageClientForGetdown'
+    dependsOn ':netty-client:jar'
+    dependsOn ':netty-client-upgrade:uploadToOSS'
     dependsOn ':netty-client-upgrade:jar'
     dependsOn ':netty-plugin-client-demo:build'
     dependsOn ':netty-plugin-server-demo:build'
@@ -66,7 +66,7 @@ tasks.register('copyToOutput') {
         }
         // Copy Netty Server Plugins
         copy {
-            from file("${project(':netty-server').projectDir}/plugins")
+            from project(':netty-plugin-server-demo').layout.buildDirectory.dir('libs')
             into file("${outputDir}/netty-server/plugins")
             include "*.jar"
         }
@@ -76,15 +76,20 @@ tasks.register('copyToOutput') {
             into file("${outputDir}/netty-server/upgrade-dir")
         }
 
-        // 2. Copy Netty Client
+        // 2. Copy Netty Client (Thin JAR and its dependency libs)
         copy {
             from project(':netty-client').layout.buildDirectory.dir('libs')
             into file("${outputDir}/netty-client")
             include "netty-client-*.jar"
+            exclude "*-plain.jar"
+        }
+        copy {
+            from project(':netty-client').configurations.runtimeClasspath
+            into file("${outputDir}/netty-client/lib")
         }
         // Copy Netty Client Plugins
         copy {
-            from file("${project(':netty-client').projectDir}/plugins")
+            from project(':netty-plugin-client-demo').layout.buildDirectory.dir('libs')
             into file("${outputDir}/netty-client/plugins")
             include "*.jar"
         }

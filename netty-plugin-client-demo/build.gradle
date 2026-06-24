@@ -2,10 +2,3 @@ dependencies {
     implementation project(':netty-common')
 }
 
-// Automatically copy the compiled jar to netty-client/plugins/
-tasks.register('copyPluginToClient', Copy) {
-    from jar
-    into file("${project(':netty-client').projectDir}/plugins")
-}
-
-build.dependsOn copyPluginToClient

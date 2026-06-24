@@ -2,10 +2,23 @@ plugins {
     id 'java'
 }
 
+configurations {
+    ossUpload
+}
+
 dependencies {
     implementation 'com.threerings.getdown:getdown-launcher:1.8.6'
     implementation 'com.threerings.getdown:getdown-core:1.8.6'
     implementation project(':netty-client')
+    
+    // Aliyun OSS dependencies included in runtime for launcher proxy support
+    implementation 'com.aliyun.oss:aliyun-sdk-oss:3.17.4'
+    implementation 'javax.xml.bind:jaxb-api:2.3.1'
+    implementation 'org.glassfish.jaxb:jaxb-runtime:2.3.3'
+    
+    ossUpload 'com.aliyun.oss:aliyun-sdk-oss:3.17.4'
+    ossUpload 'javax.xml.bind:jaxb-api:2.3.1'
+    ossUpload 'org.glassfish.jaxb:jaxb-runtime:2.3.3'
 }
 
 jar {
@@ -23,12 +36,14 @@ jar {
         exclude "META-INF/*.RSA"
         exclude "META-INF/SIG-*"
     }
+    exclude "**/OSSUploader.class"
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 // Define packaging task
 task packageClientForGetdown {
-    dependsOn ':netty-client:bootJar'
+    dependsOn ':netty-client:jar'
+    dependsOn ':netty-common:jar'
 
     doLast {
         def upgradeDir = file("${project.buildDir}/upgrade-dir")
@@ -37,14 +52,14 @@ task packageClientForGetdown {
         }
         upgradeDir.mkdirs()
 
-        // 1. Copy Netty Client Boot JAR
+        // 1. Copy Netty Client Thin JAR
         def clientJar = file("${project.project(':netty-client').buildDir}/libs/netty-client-1.0.0.jar")
         if (!clientJar.exists()) {
-            // Find any jar in the build/libs directory
+            // Find any non-plain jar in the build/libs directory
             def libsDir = file("${project.project(':netty-client').buildDir}/libs")
             if (libsDir.exists()) {
-                def files = libsDir.listFiles()
-                if (files != null && files.length > 0) {
+                def files = libsDir.listFiles().findAll { !it.name.contains("plain") && !it.name.contains("original") }
+                if (files != null && files.size() > 0) {
                     clientJar = files[0]
                 }
             }
@@ -56,28 +71,75 @@ task packageClientForGetdown {
 
         def targetJar = new File(upgradeDir, "netty-client.jar")
         targetJar.bytes = clientJar.bytes
-        println "Copied client JAR to: ${targetJar.absolutePath}"
+        println "Copied client thin JAR to: ${targetJar.absolutePath}"
 
-        // 2. Generate getdown.txt
+        // 2. Copy dependencies to upgrade-dir/lib
+        def libDir = file("${upgradeDir}/lib")
+        libDir.mkdirs()
+        
+        def clientProject = project(':netty-client')
+        def dependencies = clientProject.configurations.runtimeClasspath.files
+        
+        def codeLines = ["code = netty-client.jar"]
+        dependencies.each { file ->
+            // Copy dependency jar to upgrade-dir/lib
+            copy {
+                from file
+                into libDir
+            }
+            codeLines.add("code = lib/${file.name}")
+        }
+
+        // 3. Generate getdown.txt
         def getdownFile = new File(upgradeDir, "getdown.txt")
-        getdownFile.text = """appbase = http://localhost:8080/upgrade
-class = org.springframework.boot.loader.JarLauncher
-code = netty-client.jar
-jvmarg = -Dfile.encoding=UTF-8
-"""
-        println "Generated getdown.txt"
+        def getdownContent = new StringBuilder()
+        getdownContent.append("appbase = https://tomin.oss-cn-beijing.aliyuncs.com/upgrade-dir/\n")
+        getdownContent.append("class = com.example.netty.client.NettyClientApplication\n")
+        codeLines.each { line ->
+            getdownContent.append(line).append("\n")
+        }
+        getdownContent.append("jvmarg = -Dfile.encoding=UTF-8\n")
+        
+        getdownFile.text = getdownContent.toString()
+        println "Generated getdown.txt with ${codeLines.size()} code entries."
 
-        // 3. Run Getdown's Digester tool to generate digest.txt and digest2.txt
+        // 4. Run Getdown's Digester tool to generate digest.txt and digest2.txt
         javaexec {
             mainClass = 'com.threerings.getdown.tools.Digester'
             classpath = configurations.runtimeClasspath
             args = [ upgradeDir.absolutePath ]
         }
         println "Generated digests using Getdown Digester tool."
+
+
     }
 }
 
-build.dependsOn packageClientForGetdown
+task uploadToOSS(type: JavaExec) {
+    dependsOn packageClientForGetdown
+    group = 'upload'
+    description = 'Uploads the generated getdown upgrade files to Aliyun OSS.'
+    
+    mainClass = 'com.example.netty.upgrade.OSSUploader'
+    classpath = sourceSets.main.output + configurations.ossUpload
+    
+    // Load credentials from local.properties if present
+    def localProps = new Properties()
+    def localPropsFile = project.rootProject.file('local.properties')
+    if (localPropsFile.exists()) {
+        localPropsFile.withInputStream { localProps.load(it) }
+    }
+    
+    def ak = System.getenv("OSS_ACCESS_KEY_ID") ?: localProps.getProperty("oss.accessKeyId") ?: ""
+    def sk = System.getenv("OSS_ACCESS_KEY_SECRET") ?: localProps.getProperty("oss.accessKeySecret") ?: ""
+    
+    systemProperty 'oss.accessKeyId', ak
+    systemProperty 'oss.accessKeySecret', sk
+    
+    args = [ file("${project.buildDir}/upgrade-dir").absolutePath ]
+}
+
+build.dependsOn uploadToOSS
 
 
 

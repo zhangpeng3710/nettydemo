@@ -7,3 +7,26 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }
+
+bootJar {
+    enabled = false
+}
+
+jar {
+    enabled = true
+    archiveClassifier = ''
+    manifest {
+        attributes(
+            'Main-Class': 'com.example.netty.client.NettyClientApplication',
+            'Class-Path': configurations.runtimeClasspath.files.collect { 'lib/' + it.name }.join(' ')
+        )
+    }
+}
+
+task copyDependencies(type: Copy) {
+    from configurations.runtimeClasspath
+    into "$buildDir/libs/lib"
+}
+
+jar.dependsOn copyDependencies
+
