@@ -94,6 +94,62 @@ public class CustomLauncher {
                             System.out.println("[LocalProxy] Successfully served rewritten getdown.txt");
                             return;
                         }
+
+                        if (ossKey.endsWith("digest2.txt")) {
+                            System.out.println("[LocalProxy] Fetching digest2.txt via presigned URL and rewriting getdown.txt SHA-256...");
+                            String originalContent;
+                            try (InputStream is = conn.getInputStream();
+                                 ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+                                byte[] buffer = new byte[4096];
+                                int len;
+                                while ((len = is.read(buffer)) != -1) {
+                                    bos.write(buffer, 0, len);
+                                }
+                                originalContent = bos.toString("UTF-8");
+                            }
+                            
+                            byte[] rewrittenGetdownBytes = getRewrittenGetdownBytes(serverUrl, port);
+                            String rewrittenGetdownSHA256 = getSHA256(rewrittenGetdownBytes);
+                            String rewrittenDigest2 = rewriteDigestFile(originalContent, "getdown.txt", rewrittenGetdownSHA256, "SHA-256");
+                            byte[] contentBytes = rewrittenDigest2.getBytes("UTF-8");
+                            
+                            exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
+                            exchange.sendResponseHeaders(200, contentBytes.length);
+                            try (OutputStream os = exchange.getResponseBody()) {
+                                os.write(contentBytes);
+                                os.flush();
+                            }
+                            System.out.println("[LocalProxy] Successfully served rewritten digest2.txt");
+                            return;
+                        }
+
+                        if (ossKey.endsWith("digest.txt")) {
+                            System.out.println("[LocalProxy] Fetching digest.txt via presigned URL and rewriting getdown.txt MD5...");
+                            String originalContent;
+                            try (InputStream is = conn.getInputStream();
+                                 ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+                                byte[] buffer = new byte[4096];
+                                int len;
+                                while ((len = is.read(buffer)) != -1) {
+                                    bos.write(buffer, 0, len);
+                                }
+                                originalContent = bos.toString("UTF-8");
+                            }
+                            
+                            byte[] rewrittenGetdownBytes = getRewrittenGetdownBytes(serverUrl, port);
+                            String rewrittenGetdownMD5 = getMD5(rewrittenGetdownBytes);
+                            String rewrittenDigest = rewriteDigestFile(originalContent, "getdown.txt", rewrittenGetdownMD5, "MD5");
+                            byte[] contentBytes = rewrittenDigest.getBytes("UTF-8");
+                            
+                            exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
+                            exchange.sendResponseHeaders(200, contentBytes.length);
+                            try (OutputStream os = exchange.getResponseBody()) {
+                                os.write(contentBytes);
+                                os.flush();
+                            }
+                            System.out.println("[LocalProxy] Successfully served rewritten digest.txt");
+                            return;
+                        }
                         
                         if (contentType != null) {
                             exchange.getResponseHeaders().set("Content-Type", contentType);
@@ -200,6 +256,76 @@ public class CustomLauncher {
             } else {
                 sb.append(line).append("\n");
             }
+        }
+        return sb.toString();
+    }
+
+    private static byte[] getRewrittenGetdownBytes(String serverUrl, int port) throws Exception {
+        String signApiUrl = serverUrl + "/upgrade/sign?key=" + java.net.URLEncoder.encode("upgrade-dir/getdown.txt", "UTF-8");
+        String presignedUrl = fetchPresignedUrl(signApiUrl);
+        java.net.URL url = new java.net.URL(presignedUrl);
+        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout(5000);
+        
+        String originalContent;
+        try (InputStream is = conn.getInputStream();
+             ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            int len;
+            while ((len = is.read(buffer)) != -1) {
+                bos.write(buffer, 0, len);
+            }
+            originalContent = bos.toString("UTF-8");
+        }
+        conn.disconnect();
+        
+        String rewritten = rewriteAppBase(originalContent, port);
+        return rewritten.getBytes("UTF-8");
+    }
+
+    private static String rewriteDigestFile(String original, String filename, String newHash, String algo) throws Exception {
+        String[] lines = original.split("\r?\n");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < lines.length - 1; i++) {
+            String line = lines[i];
+            if (line.trim().startsWith(filename + " =")) {
+                sb.append(filename).append(" = ").append(newHash).append("\n");
+            } else {
+                sb.append(line).append("\n");
+            }
+        }
+        
+        String contentSoFar = sb.toString();
+        byte[] contentBytes = contentSoFar.getBytes("UTF-8");
+        String fileHash;
+        if ("SHA-256".equalsIgnoreCase(algo)) {
+            fileHash = getSHA256(contentBytes);
+            sb.append("digest2.txt = ").append(fileHash).append("\n");
+        } else {
+            fileHash = getMD5(contentBytes);
+            sb.append("digest.txt = ").append(fileHash).append("\n");
+        }
+        return sb.toString();
+    }
+
+    private static String getMD5(byte[] bytes) throws Exception {
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
+        byte[] digest = md.digest(bytes);
+        return bytesToHex(digest);
+    }
+
+    private static String getSHA256(byte[] bytes) throws Exception {
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+        byte[] digest = md.digest(bytes);
+        return bytesToHex(digest);
+    }
+
+    private static String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder();
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
         }
         return sb.toString();
     }

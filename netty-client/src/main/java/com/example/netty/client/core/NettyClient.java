@@ -120,7 +120,7 @@ public class NettyClient {
                  // IdleStateHandler for sending heartbeat Pings (only for long connections)
                  if (!"SHORT".equalsIgnoreCase(mode)) {
                      // 0 reader idle, heartbeatInterval writer idle (no write for N seconds triggers ping), 0 all idle
-                     pipeline.addLast("idleStateHandler", new IdleStateHandler(0, heartbeatInterval, 0, TimeUnit.SECONDS));
+                     pipeline.addLast("idleStateHandler", new IdleStateHandler(30, heartbeatInterval, 0, TimeUnit.SECONDS));
                  }
 
                  // Protobuf Decoders & Encoders

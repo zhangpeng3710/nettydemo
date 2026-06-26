@@ -73,7 +73,7 @@ tasks.register('copyToOutput') {
         // Copy upgrade-dir to netty-server/upgrade-dir
         copy {
             from file("${project(':netty-client-upgrade').buildDir}/upgrade-dir")
-            into file("${outputDir}/netty-server/upgrade-dir")
+            into file("${outputDir}/upgrade-dir")
         }
 
         // 2. Copy Netty Client (Thin JAR and its dependency libs)
