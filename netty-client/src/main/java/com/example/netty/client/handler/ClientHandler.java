@@ -1,7 +1,9 @@
 package com.example.netty.client.handler;
 
+import com.example.netty.client.core.UpgradeService;
 import com.example.netty.common.plugin.PluginRegistry;
 import com.example.netty.common.proto.MessagePacket;
+import com.example.netty.common.proto.MessageType;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import org.slf4j.Logger;
@@ -12,17 +14,25 @@ public class ClientHandler extends SimpleChannelInboundHandler<MessagePacket> {
     private static final Logger log = LoggerFactory.getLogger(ClientHandler.class);
     private final String connectionType;
     private final PluginRegistry pluginRegistry;
+    private final UpgradeService upgradeService;
 
-    public ClientHandler(String connectionType, PluginRegistry pluginRegistry) {
+    public ClientHandler(String connectionType, PluginRegistry pluginRegistry, UpgradeService upgradeService) {
         this.connectionType = connectionType;
         this.pluginRegistry = pluginRegistry;
+        this.upgradeService = upgradeService;
     }
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, MessagePacket packet) throws Exception {
         log.info("[Client][{}] Received response packet: type={}, seq={}", connectionType, packet.getType(), packet.getSequence());
+        if (packet.getType() == MessageType.UPGRADE) {
+            log.info("[Client][{}] Received core UPGRADE message, routing to basic UpgradeService.", connectionType);
+            upgradeService.handleUpgradeCommand(packet.getUpgradeCommand());
+            return;
+        }
         pluginRegistry.dispatchMessage(ctx, packet, connectionType);
     }
+
 
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {

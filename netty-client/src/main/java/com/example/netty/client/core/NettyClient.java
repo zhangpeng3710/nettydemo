@@ -21,6 +21,7 @@ import io.netty.handler.codec.protobuf.ProtobufVarint32FrameDecoder;
 import io.netty.handler.codec.protobuf.ProtobufVarint32LengthFieldPrepender;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.timeout.IdleStateHandler;
+import com.example.netty.client.core.UpgradeService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,6 +36,10 @@ import java.util.concurrent.TimeUnit;
 public class NettyClient {
 
     private static final Logger log = LoggerFactory.getLogger(NettyClient.class);
+
+    @Autowired
+    private UpgradeService upgradeService;
+
 
     @Value("${netty.host}")
     private String host;
@@ -131,7 +136,7 @@ public class NettyClient {
                  pipeline.addLast("protobufEncoder", new ProtobufEncoder());
 
                  // Client Handler
-                 pipeline.addLast("handler", new ClientHandler(mode, pluginRegistry));
+                 pipeline.addLast("handler", new ClientHandler(mode, pluginRegistry, upgradeService));
              }
          });
 

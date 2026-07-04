@@ -11,20 +11,78 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
+import java.io.File;
+import java.io.RandomAccessFile;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.util.UUID;
 
 @SpringBootApplication
+@EnableScheduling
 public class NettyClientApplication implements CommandLineRunner {
 
+
     private static final Logger log = LoggerFactory.getLogger(NettyClientApplication.class);
+
+    private static FileLock instanceLock;
+    private static FileChannel lockChannel;
+    private static RandomAccessFile lockFileRaf;
 
     @Autowired
     private NettyClient client;
 
     public static void main(String[] args) {
+        if (!acquireSingleInstanceLock()) {
+            System.err.println("[Client] Another client instance is already running! Exiting...");
+            System.exit(0);
+        }
         SpringApplication.run(NettyClientApplication.class, args);
     }
+
+    private static boolean acquireSingleInstanceLock() {
+        try {
+            File lockFile = new File("netty-client.lock");
+            lockFileRaf = new RandomAccessFile(lockFile, "rw");
+            lockChannel = lockFileRaf.getChannel();
+            // tryLock is non-blocking, returns null if already locked
+            instanceLock = lockChannel.tryLock();
+            if (instanceLock != null) {
+                log.info("[Client] Acquired single instance lock successfully on netty-client.lock");
+                // Register a shutdown hook to release the lock on JVM exit
+                Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                    releaseSingleInstanceLock();
+                }));
+                return true;
+            }
+        } catch (Exception e) {
+            System.err.println("[Client] Failed to acquire single instance lock: " + e.getMessage());
+        }
+        return false;
+    }
+
+    private static void releaseSingleInstanceLock() {
+        try {
+            log.info("[Client] Releasing single instance lock on netty-client.lock...");
+            if (instanceLock != null && instanceLock.isValid()) {
+                instanceLock.release();
+            }
+            if (lockChannel != null) {
+                lockChannel.close();
+            }
+            if (lockFileRaf != null) {
+                lockFileRaf.close();
+            }
+            File lockFile = new File("netty-client.lock");
+            if (lockFile.exists()) {
+                lockFile.delete();
+            }
+        } catch (Exception e) {
+            // Ignore exceptions during shutdown hook
+        }
+    }
+
 
     @Override
     public void run(String... args) throws Exception {

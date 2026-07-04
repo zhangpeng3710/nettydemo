@@ -7,8 +7,6 @@ configurations {
 }
 
 dependencies {
-    implementation 'com.threerings.getdown:getdown-launcher:1.8.6'
-    implementation 'com.threerings.getdown:getdown-core:1.8.6'
     implementation project(':netty-client')
     
     // Aliyun OSS dependencies included in compileOnly for compilation of OSSUploader
@@ -24,7 +22,7 @@ dependencies {
 jar {
     manifest {
         attributes(
-            'Main-Class': 'com.example.netty.upgrade.CustomLauncher'
+            'Main-Class': 'com.example.netty.upgrade.UpgradeAgent'
         )
     }
     dependsOn configurations.runtimeClasspath
@@ -40,87 +38,13 @@ jar {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
-// Define packaging task
-task packageClientForGetdown {
-    dependsOn ':netty-client:jar'
-    dependsOn ':netty-common:jar'
-
-    doLast {
-        def upgradeDir = file("${project.buildDir}/upgrade-dir")
-        if (upgradeDir.exists()) {
-            upgradeDir.deleteDir()
-        }
-        upgradeDir.mkdirs()
-
-        // 1. Copy Netty Client Thin JAR
-        def clientJar = file("${project.project(':netty-client').buildDir}/libs/netty-client-1.0.0.jar")
-        if (!clientJar.exists()) {
-            // Find any non-plain jar in the build/libs directory
-            def libsDir = file("${project.project(':netty-client').buildDir}/libs")
-            if (libsDir.exists()) {
-                def files = libsDir.listFiles().findAll { !it.name.contains("plain") && !it.name.contains("original") }
-                if (files != null && files.size() > 0) {
-                    clientJar = files[0]
-                }
-            }
-        }
-        
-        if (!clientJar.exists()) {
-            throw new GradleException("Could not find compiled netty-client JAR")
-        }
-
-        def targetJar = new File(upgradeDir, "netty-client.jar")
-        targetJar.bytes = clientJar.bytes
-        println "Copied client thin JAR to: ${targetJar.absolutePath}"
-
-        // 2. Copy dependencies to upgrade-dir/lib
-        def libDir = file("${upgradeDir}/lib")
-        libDir.mkdirs()
-        
-        def clientProject = project(':netty-client')
-        def dependencies = clientProject.configurations.runtimeClasspath.files
-        
-        def codeLines = ["code = netty-client.jar"]
-        dependencies.each { file ->
-            // Copy dependency jar to upgrade-dir/lib
-            copy {
-                from file
-                into libDir
-            }
-            codeLines.add("code = lib/${file.name}")
-        }
-
-        // 3. Generate getdown.txt
-        def getdownFile = new File(upgradeDir, "getdown.txt")
-        def getdownContent = new StringBuilder()
-        getdownContent.append("appbase = https://tomin.oss-cn-beijing.aliyuncs.com/upgrade-dir/\n")
-        getdownContent.append("class = com.example.netty.client.NettyClientApplication\n")
-        codeLines.each { line ->
-            getdownContent.append(line).append("\n")
-        }
-        getdownContent.append("jvmarg = -Dfile.encoding=UTF-8\n")
-        
-        getdownFile.text = getdownContent.toString()
-        println "Generated getdown.txt with ${codeLines.size()} code entries."
-
-        // 4. Run Getdown's Digester tool to generate digest.txt and digest2.txt
-        javaexec {
-            mainClass = 'com.threerings.getdown.tools.Digester'
-            classpath = configurations.runtimeClasspath
-            args = [ upgradeDir.absolutePath ]
-        }
-        println "Generated digests using Getdown Digester tool."
-
-
-    }
-}
-
 task uploadToOSS(type: JavaExec) {
-    dependsOn packageClientForGetdown
+    dependsOn ':netty-client:packageClientForGetdown'
     group = 'upload'
     description = 'Uploads the generated getdown upgrade files to Aliyun OSS.'
     
     mainClass = 'com.example.netty.upgrade.OSSUploader'
+    // Ensure both compiled outputs and ossUpload configurations are in classpath
     classpath = sourceSets.main.output + configurations.ossUpload
     
     // Load credentials from local.properties if present
@@ -136,10 +60,8 @@ task uploadToOSS(type: JavaExec) {
     systemProperty 'oss.accessKeyId', ak
     systemProperty 'oss.accessKeySecret', sk
     
-    args = [ file("${project.buildDir}/upgrade-dir").absolutePath ]
+    // Point to netty-client build/upgrade-dir
+    args = [ file("${project(':netty-client').buildDir}/upgrade-dir").absolutePath ]
 }
 
 build.dependsOn uploadToOSS
-
-
-

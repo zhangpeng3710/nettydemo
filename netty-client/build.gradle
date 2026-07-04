@@ -5,6 +5,7 @@ plugins {
 dependencies {
     implementation project(':netty-common')
     implementation 'org.springframework.boot:spring-boot-starter'
+    implementation 'cn.hutool:hutool-all:5.8.25'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }
 
@@ -29,4 +30,82 @@ task copyDependencies(type: Copy) {
 }
 
 jar.dependsOn copyDependencies
+
+task runGenKeys(type: JavaExec) {
+    dependsOn compileTestJava
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.example.netty.client.GenerateKeysTest'
+}
+
+task packageClientForGetdown {
+    dependsOn 'jar'
+    dependsOn 'copyDependencies'
+
+    doLast {
+        def upgradeDir = file("${project.buildDir}/upgrade-dir")
+        if (upgradeDir.exists()) {
+            upgradeDir.deleteDir()
+        }
+        upgradeDir.mkdirs()
+
+        // 1. Copy Netty Client Thin JAR
+        def clientJar = file("${project.buildDir}/libs/netty-client-1.0.0.jar")
+        if (!clientJar.exists()) {
+            def libsDir = file("${project.buildDir}/libs")
+            if (libsDir.exists()) {
+                def files = libsDir.listFiles().findAll { !it.name.contains("plain") && !it.name.contains("original") }
+                if (files != null && files.size() > 0) {
+                    clientJar = files[0]
+                }
+            }
+        }
+        
+        if (!clientJar.exists()) {
+            throw new GradleException("Could not find compiled netty-client JAR")
+        }
+
+        def targetJar = new File(upgradeDir, "netty-client.jar")
+        targetJar.bytes = clientJar.bytes
+        println "[Build] Copied client thin JAR to: ${targetJar.absolutePath}"
+
+        // 2. Copy dependencies to upgrade-dir/lib
+        def libDir = file("${upgradeDir}/lib")
+        libDir.mkdirs()
+        
+        def dependencies = project.configurations.runtimeClasspath.files
+        
+        def codeLines = ["code = netty-client.jar"]
+        dependencies.each { file ->
+            copy {
+                from file
+                into libDir
+            }
+            codeLines.add("code = lib/${file.name}")
+        }
+
+        // 3. Generate getdown.txt
+        def getdownFile = new File(upgradeDir, "getdown.txt")
+        def getdownContent = new StringBuilder()
+        getdownContent.append("appbase = https://tomin.oss-cn-beijing.aliyuncs.com/upgrade-dir/\n")
+        getdownContent.append("class = com.example.netty.client.NettyClientApplication\n")
+        getdownContent.append("version = 1.0.1\n")
+        codeLines.each { line ->
+            getdownContent.append(line).append("\n")
+        }
+        getdownContent.append("jvmarg = -Dfile.encoding=UTF-8\n")
+        
+        getdownFile.text = getdownContent.toString()
+        println "[Build] Generated getdown.txt with ${codeLines.size()} code entries."
+
+        // 4. Run our custom Digester tool
+        javaexec {
+            mainClass = 'com.example.netty.client.tools.Digester'
+            classpath = sourceSets.main.runtimeClasspath
+            args = [ upgradeDir.absolutePath ]
+        }
+        println "[Build] Generated digests using custom Digester tool."
+    }
+}
+
+
 
